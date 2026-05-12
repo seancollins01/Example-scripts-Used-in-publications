@@ -16,9 +16,37 @@
 
 ### Snp imputation R obtained from https://popgen.nescent.org/2018-03-27_RDA_GEA.html
 
+
+##################################################################################################3###
 ### Phenotypic data analysis R
+library(broom)
+library(dplyr)
+library(car)
+library(RVAideMemoire)
+
+### Shapiro test by seed source or region
+updated.pheno = read.csv(""/scratch/smc2266/Pipo_Exome_Capture/Plates_2_6_GWAS/Physiological_DATA/Pipo_P2_6_eigen_vectors_ww_traits_vcf_order_updated_all_traits_measured_as_of_11_13_24_Osmo_needles_per_bundle_isotopes_seed_sources_Updated.csv")
+
+Shoot.mass.shaprio.log <- updated.pheno %>% 
+  group_by(Region) %>% 
+  do(tidy(shapiro.test(.$Dry_Shoot_Weight.log)))
+
+result = leveneTest(Dry_Shoot_Weight.log ~ Region,data= updated.pheno)
+## anova example
+
+aov.example = aov(Dry_Shoot_Weight.log ~ Region,data= updated.pheno)
+
+## Permutated anova example
+Shoot.Root.Length.perm.anova = perm.anova(Dry_Shoot_Weight.log ~ Region,data = updated.pheno, nperm = 10000,
+  progress = TRUE)
+
+### Pairwise t test
+drought.d13C.paiwise.t = pairwise.t.test(updated.pheno.csv$Drought.d13C, factor(updated.pheno$Region), p.adjust.method = "bonf",paired = FALSE)
 
 
+shoot.Root.length.paiwise.wilxoc = pairwise.wilcox.test(updated.pheno$Shoot.Root, factor(updated.pheno$Region), p.adjust.method = "bonf",paired = FALSE)
+### end of physiological examples####
+###############################################################################################################
 #### GWAS with GEMMA bash
 
 ### Need ped,bed,bim and fam files all with same prefix made from plink
@@ -30,7 +58,7 @@ srun gemma -bfile Pipo_Gemma -lm 1 -o Pipo_Gemma_drought_d13C_lm
 
 srun gemma -bfile Pipo_Gemma -k /scratch/smc2266/Pipo_Exome_Capture/Plate_1_Pool_Seq/freebayes_bam_list/output/Pipo_Test_recode_kinship.sXX.txt -lmm 4 -o Pipo_Gemma_drought_d13C_lmm
 
-
+##################################################################################################################
 
 ### GWAS with Blink R
 ############### Look into snps structure
@@ -48,6 +76,7 @@ my_blink.d13C <- Blink(
   GM = Pipo_map,
   maxLoop = 10, time.cal = T)
 
+###############################################################################################################
 ### Genomic prediction for xgboost python
 
 import pandas as pd
