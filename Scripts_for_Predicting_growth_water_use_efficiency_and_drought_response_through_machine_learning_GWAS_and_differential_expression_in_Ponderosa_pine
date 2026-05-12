@@ -1,0 +1,205 @@
+#### All code used in Predicting growth, water-use efficiency and drought response through machine learning, GWAS and differential expression in Ponderosa pine
+### Many processes were repeated for each trait and as such example scripts for each test are only presented
+### Category of script and computing langugae are shown in the comment
+### Some sections still under construction
+
+
+###### Sequence QA/QC bash
+
+##### Sequence Mapping bash
+
+### Sort by coordiantes and remove duplicates bash
+
+#### Snp Calling bash
+
+#### Snp filtering bash
+
+### Snp imputation R obtained from https://popgen.nescent.org/2018-03-27_RDA_GEA.html
+
+### Phenotypic data analysis R
+
+
+#### GWAS with GEMMA bash
+
+### Need ped,bed,bim and fam files all with same prefix made from plink
+### fam file has to have last column as phenotype
+
+srun gemma -bfile Pipo_Gemma -gk 1 -o Pipo_Test_recode_kinship
+
+srun gemma -bfile Pipo_Gemma -lm 1 -o Pipo_Gemma_drought_d13C_lm
+
+srun gemma -bfile Pipo_Gemma -k /scratch/smc2266/Pipo_Exome_Capture/Plate_1_Pool_Seq/freebayes_bam_list/output/Pipo_Test_recode_kinship.sXX.txt -lmm 4 -o Pipo_Gemma_drought_d13C_lmm
+
+
+
+### GWAS with Blink R
+############### Look into snps structure
+source("http://zzlab.net/GAPIT/gapit_functions.txt")
+
+Pipo_map = read.table("myData.map",head=T) ## Map produced using plink --recode
+
+GAPIT_SNPS = read.big.matrix("myData.dat",head=F,sep="\t",type="char") 
+
+GAPIT_Pheno_d13C = read.table("myData.txt",head = T) 
+
+my_blink.d13C <- Blink(
+  Y = GAPIT_Pheno_d13C,
+  GD = GAPIT_SNPS,
+  GM = Pipo_map,
+  maxLoop = 10, time.cal = T)
+
+### Genomic prediction for xgboost python
+
+import pandas as pd
+import numpy as np
+import xgboost xgb
+
+SNPs = pd.read_csv("/scratch/smc2266/Pipo_Exome_Capture/Plates_2_6_GWAS/Physiological_DATA/gen.imp.GWAS.MAF.005.df.proper.orient.RDA.Style.Imput.csv")
+
+Phenotypes = pd.read_csv("/scratch/smc2266/Pipo_Exome_Capture/Plates_2_6_GWAS/Physiological_DATA/Pipo_P2_6_eigen_vectors_ww_traits_vcf_order_updated_all_traits_measured_as_of_11_13_24_Osmo_needles_per_bundle_isotopes_seed_sources_Updated.csv")
+
+ 
+Height = Phenotypes.iloc[:,20] ## whereever the trait of interest is
+
+SNPs_New = SNPs.drop(SNPs.columns[[0]], axis=1) ## Get rid of index column
+
+X = SNPs_New.to_numpy()
+
+y = Height.to_numpy()
+
+from sklearn.model_selection import train_test_split
+
+X_train, X_test, y_train, y_test = train_test_split(
+    X, y, test_size=0.25, random_state=42)
+    
+### Premlinary 75/25 testing
+
+subset_001_Dtrain_reg = xgb.DMatrix(X_train, y_train)
+subse_001_tDval_reg = xgb.DMatrix(X_test, y_test)
+
+evallist = [(subset_001_Dtrain_reg, 'train'), (subse_001_tDval_reg, 'eval')]
+
+param = {'max_depth' : 2, 'eta' : .1,'gamma': 2, 'lambda': 2, 'alpha' :2, 'nthread' : 15, 'objective' : "reg:squarederror", 'eval_metric' : "rmse"} ### Some basic hyperparmeter to play around with
+
+num_round = 50
+subsetBst001 = xgb.train(param, subset_001_Dtrain_reg, num_round, evallist)
+
+
+feature_map = subsetBst001.get_fscore() ## How to get predictive snp importances
+
+
+
+test_importance001 = pd.DataFrame.from_dict(feature_map,orient='index') ## how to get predictive snp indexes
+
+Height_SNP_names = test_importance001.index ## how to get snp names to keep
+
+height_SNPs_keep = Just_SNPs_WW_d15N_no_na.loc[:,Height_SNP_names]
+
+
+height_SNPs_keep.to_csv("name_for_candidate_loci.csv")
+
+### Setting up 10fold cross validation
+
+
+def kfold_indices(data, k):
+    fold_size = len(data) // k
+    indices = np.arange(len(data))
+    folds = []
+    for i in range(k):
+        test_indices = indices[i * fold_size: (i + 1) * fold_size]groups = SSource_d15N_no_na.to_numpy()
+
+k = 10
+
+
+fold_indices = kfold_indices(X, k)
+
+predicted_values2 = []
+
+actual_values = []
+
+train_indicies_for_sorting_pred_values2 = []
+
+scores2 = []
+
+from sklearn.metrics import root_mean_squared_error
+
+
+for train_indices, test_indices in fold_indices:
+    X_train, y_train = X[train_indices], y[train_indices]
+    X_test, y_test = X[test_indices], y[test_indices]
+    
+    # Train the model on the training data
+    BST_TEST_d15N.fit(X_train, y_train)
+    
+    # Make predictions on the test data
+    y_pred = BST_TEST_d15N.predict(X_test)
+    
+    ## append predicted values
+    predicted_values2.append(y_pred)
+    
+    ## get indicies of predicted
+    
+    act_values = y_test
+    
+    actual_values.append(act_values)
+    
+    val_indicies = test_indices
+    
+    train_indicies_for_sorting_pred_values2.append(val_indicies)
+    
+    
+    # Calculate the accuracy score for this fold
+    fold_score = root_mean_squared_error(y_test, y_pred)
+    
+    # Append the fold score to the list of scores
+    scores2.append(fold_score)
+
+
+
+scores2 ## Shows all fold scroes
+
+np.mean(scores2) ## shows mean
+
+
+### Setting up leaveone group out cross validation
+
+region = Phenotypes.iloc[:,30]
+
+groups = region.to_numpy()
+
+logo.get_n_splits(X, y, groups)
+
+predicted_values2 = []
+actual_values = []
+train_indicies_for_sorting_pred_values2 = []
+scores2 = []
+
+
+for i, (train_index, test_index) in enumerate(logo.split(X, y, groups)):
+    X_train, y_train = X[train_index], y[train_index]
+    X_test, y_test = X[test_index], y[test_index]
+    
+    # Train the model on the training data
+    BST_TEST_d15N.fit(X_train, y_train)
+    
+    # Make predictions on the test data
+    y_pred = BST_TEST_d15N.predict(X_test)
+    
+    ## append predicted values
+    predicted_values2.append(y_pred)
+    
+    ## get indicies of predicted
+    
+    act_values = y_test
+    
+    actual_values.append(act_values)
+    
+    val_indicies = test_index
+    
+    train_indicies_for_sorting_pred_values2.append(val_indicies)
+   
+    # Calculate the accuracy score for this fold
+    fold_score = root_mean_squared_error(y_test, y_pred)
+    
+    # Append the fold score to the list of scores
+    scores2.append(fold_score)
