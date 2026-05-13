@@ -1,26 +1,142 @@
 #### All code used in Predicting growth, water-use efficiency and drought response through machine learning, GWAS and differential expression in Ponderosa pine
 ### Many processes were repeated for each trait and as such example scripts for each test are only presented
 ### Category of script and computing langugae are shown in the comment
-### Some sections still under construction
+
 
 
 ###### Sequence QA/QC bash
+for infile in *1.fq.gz
+  do
+    name=$(basename ${infile} 1.fq.gz)
+   srun fastp --qualified_quality_phred 30 -i ${name}1.fq.gz  -I ${name}2.fq.gz   -o ${name}R1.filtered.fastq.gz -O ${name}R2.filtered.fastq.gz
+  done
 
 ##### Sequence Mapping bash
+
+for infile in *R1.filtered.fastq.gz
+  do
+    name=$(basename ${infile} R1.filtered.fastq.gz)
+bwa mem -t 15 -R '@RG\tID:${name}\tSM:${name}' /scratch/smc2266/Transcriptome_Filter_Probe_Design_03_23/Pita.2_0.fa ${name}R1.filtered.fastq.gz ${name}R2.filtered.fastq.gz > /scratch/smc2266/Pipo_Exome_Capture/Plates_2_6_GWAS/Mapped.sam/${name}.sam
+  done
 
 ### Sort by coordiantes and remove duplicates bash
 
 #### Snp Calling bash
 
+#!/bin/bash
+#SBATCH --job-name=BCFTools_pileup_P2 # the name of your job
+#SBATCH --output=/scratch/smc2266/Pipo_Exome_Capture/Plates_2_6_GWAS/freebayes/bcftools_pileup_annotate_call_P2.txt
+#SBATCH --chdir=/scratch/smc2266/Pipo_Exome_Capture/Plates_2_6_GWAS/freebayes # your work directory
+#SBATCH --time=72:00:00 # (max time) 12hrs
+#SBATCH --mem=10000 # (total mem) 100G
+#SBATCH -c20
+
+module load mambaforge
+mamba activate bcftools_env
+srun bash -c "bcftools mpileup \
+ --annotate FORMAT/AD,FORMAT/DP,INFO/AD \
+ -f /scratch/smc2266/Transcriptome_Filter_Probe_Design_03_23/Pita.2_0.fa \
+ -b /scratch/smc2266/Pipo_Exome_Capture/Plates_2_6_GWAS/freebayes/bam.list \
+ -q 20 -Q 30 \
+ --threads 20 | bcftools call --threads 20 -m -v -Oz -o /scratch/smc2266/Pipo_Exome_Capture/Plate_1_Pool_Seq/freebayes_bam_list/Pipo.bcftools.P2_6_annotate.vcf.gz"
+
 #### Snp filtering bash
+srun bcftools filter --threads 10 -i 'QUAL>20' /scratch/smc2266/Pipo_Exome_Capture/Plate_1_Pool_Seq/freebayes_bam_list/Pipo.bcftools.P2_6_annotate.vcf.gz -Oz -o Pipo.bcftools.P2_6.Annotated.Qual.20.Filt.vcf.gz
 
 ##############################################################################################################
 ####### RNA Methods
+#### Kraken Contamination db build
+module load kraken2
+module load blast
+
+srun kraken2-build --download-library bacteria --threads 32 --db RNA_Contamination
+srun kraken2-build --download-library protozoa --threads 32 --db RNA_Contamination
+srun kraken2-build --download-library human --threads 32 --db RNA_Contamination
+srun kraken2-build --download-library fungi --threads 32 --db RNA_Contamination
+srun kraken2-build --download-library plant --threads 32 --db RNA_Contamination
+srun kraken2-build --build --threads 32 --db RNA_Contamination
+
+##### Kraken Contaim run
+for infile in *R1.filtered.fastq.gz
+  do
+    name=$(basename ${infile} R1.filtered.fastq.gz)
+
+srun kraken2 --db $kraken_db \
+                --report ${name}.report \
+                --paired ${name}R1.filtered.fastq.gz ${name}R2.filtered.fastq.gz \
+                --use-names \
+RNA_Kraken_Contaim.sh
 
 
 
+
+### Trinity Assembly script
+srun singularity exec -e trinityrnaseq.v2.15.2.simg  Trinity \
+ --seqType fq \
+  --left ${name}unclassified_1.fq \
+  --right ${name}unclassified_2.fq \
+  --min_contig_length 300 \
+  --CPU 20 \
+  --max_memory 270G \
+  --output scratch/smc2266/Pipo_RNA_Seq/RAW_Data/usftp21.novogene.com/ALL_RAW_READS/Trinity_de_novo_assembled/${name}.Trinity.de.novo \
+  --full_cleanup
+
+######################################
+
+########### Transcdecoder orf
+srun singularity exec -e transdecoder.v5.7.1.simg TransDecoder.LongOrfs -t scratch/smc2266/Pipo_RNA_Seq/RAW_Data/usftp21.novogene.com/ALL_RAW_READS/Trinity_de_novo_assembled/Trinity_combined_All_assemblies.fasta
+
+###################################
+### Transdecoder predict
+srun singularity exec -e transdecoder.v5.7.1.simg TransDecoder.Predict -t /scratch/smc2266/Pipo_RNA_Seq/RAW_Data/usftp21.novogene.com/ALL_RAW_READS/Trinity_combined_All_assemblies.fasta \
+        --retain_pfam_hits pfam.domtblout \
+        --cpu 10
+
+
+
+####################################
+#### vsearch bash script
+srun vsearch --threads 10 --log LOGFile \
+        --cluster_fast Trinity_combined_All_assemblies.fasta.transdecoder.cds \
+        --id 0.90 \
+        --centroids Pipo_centroids.fasta \
+        --uc clusters.u
+##########
+
+### hmmer 
+srun /scratch/smc2266/Pipo_RNA_Seq/RAW_Data/usftp21.novogene.com/ALL_RAW_READS/hmmer-3.4/src/hmmscan --cpu 20 \
+        --domtblout pfam.domtblout \
+        /scratch/smc2266/Pipo_RNA_Seq/RAW_Data/usftp21.novogene.com/ALL_RAW_READS/Pfam-A.hmm \
+        /scratch/smc2266/Pipo_RNA_Seq/RAW_Data/usftp21.novogene.com/ALL_RAW_READS/Trinity_combined_All_assemblies.fasta.transdecoder_dir/longest_orfs.pep
+
+
+#### Kallisto counts
+
+for infile in *unclassified_1.fq
+  do
+    name=$(basename ${infile} unclassified_1.fq)
+
+srun kallisto quant \
+  -i Pipo_centroids.fa.index \
+  -o ${name}_Kallisto \
+  -t 16 \
+  ${name}unclassified_1.fq ${name}unclassified_2.fq
+  done
+
+
+
+
+########################################################################################################
 ### Snp imputation R obtained from https://popgen.nescent.org/2018-03-27_RDA_GEA.html
+library(vcfR)
+read.vcfR("Pipo.bcftools.Qual.20.MAF.0.05.Cll.Rate..75.Filt.P2_6.vcf.gz.recode.vcf") -> P.2.6.bcftools
+vcfR2genlight(P.2.6.bcftools) -> P.2.6.bcftools.gl
+read.csv("P.2.6.Region.Name.Seed.Source.Elv.csv") -> P.2.6.Region.Name.Seed.Source.Elv.csv
 
+ab.mat <- as.matrix(P.2.6.bcftools.gl)
+
+gen.imp <- apply(ab.mat, 2, function(x) replace(x, is.na(x), as.numeric(names(which.max(table(x))))))
+#####################################################################################################
 
 ##################################################################################################3###
 ### Phenotypic data analysis R
