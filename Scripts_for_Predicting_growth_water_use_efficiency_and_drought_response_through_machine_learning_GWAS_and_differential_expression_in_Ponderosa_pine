@@ -16,11 +16,27 @@ for infile in *1.fq.gz
 for infile in *R1.filtered.fastq.gz
   do
     name=$(basename ${infile} R1.filtered.fastq.gz)
-bwa mem -t 15 -R '@RG\tID:${name}\tSM:${name}' /scratch/smc2266/Transcriptome_Filter_Probe_Design_03_23/Pita.2_0.fa ${name}R1.filtered.fastq.gz ${name}R2.filtered.fastq.gz > /scratch/smc2266/Pipo_Exome_Capture/Plates_2_6_GWAS/Mapped.sam/${name}.sam
+bwa mem -t 15 -R '@RG\tID:${name}\tSM:${name}' Pita.2_0.fa ${name}R1.filtered.fastq.gz ${name}R2.filtered.fastq.gz > ${name}.sam
   done
+### sam to bam bash
+for infile in *.sam
+  do
+    name=$(basename ${infile} .sam)
+srun samtools view -S -b -h ${name}.sam > ${name}.bam
+done
 
 ### Sort by coordiantes and remove duplicates bash
+for infile in *.bam
+  do
+    name=$(basename ${infile} .bam)
 
+java -jar $PICARD MarkDuplicates \
+        INPUT=${name}.bam \
+        OUTPUT=${name}Mrkdup.bam \
+        METRICS_FILE=$IN.metrics.txt \
+        ASSUME_SORT_ORDER=coordinate \
+        CREATE_INDEX=False
+done
 #### Snp Calling bash
 
 #!/bin/bash
@@ -41,7 +57,9 @@ srun bash -c "bcftools mpileup \
  --threads 20 | bcftools call --threads 20 -m -v -Oz -o /scratch/smc2266/Pipo_Exome_Capture/Plate_1_Pool_Seq/freebayes_bam_list/Pipo.bcftools.P2_6_annotate.vcf.gz"
 
 #### Snp filtering bash
-srun bcftools filter --threads 10 -i 'QUAL>20' /scratch/smc2266/Pipo_Exome_Capture/Plate_1_Pool_Seq/freebayes_bam_list/Pipo.bcftools.P2_6_annotate.vcf.gz -Oz -o Pipo.bcftools.P2_6.Annotated.Qual.20.Filt.vcf.gz
+srun vcftools --gzvcf Pipo.bcftools.P2_6_annotate.vcf.gz \
+ --maf 0.01  --max-missing 0.75  --recode --recode-INFO-all \
+ --out Pipo.bcftools.P2_6_annotate_Qual_20_MAF_001_call_rate_0_75.vcf.gz
 
 ##############################################################################################################
 ####### RNA Methods
@@ -70,7 +88,7 @@ RNA_Kraken_Contaim.sh
 
 
 
-### Trinity Assembly script
+##### Trinity Assembly script
 srun singularity exec -e trinityrnaseq.v2.15.2.simg  Trinity \
  --seqType fq \
   --left ${name}unclassified_1.fq \
@@ -182,14 +200,13 @@ srun gemma -bfile Pipo_Gemma -k /scratch/smc2266/Pipo_Exome_Capture/Plate_1_Pool
 ##################################################################################################################
 
 ### GWAS with Blink R
-############### Look into snps structure
 source("http://zzlab.net/GAPIT/gapit_functions.txt")
 
-Pipo_map = read.table("myData.map",head=T) ## Map produced using plink --recode
+Pipo_map = read.table("pipo.map",head=T) ## Map produced using plink --recode
 
-GAPIT_SNPS = read.big.matrix("myData.dat",head=F,sep="\t",type="char") 
+GAPIT_SNPS = read.big.matrix("snps.dat",head=F,sep="\t",type="char") 
 
-GAPIT_Pheno_d13C = read.table("myData.txt",head = T) 
+GAPIT_Pheno_d13C = read.table("pheno.txt",head = T) 
 
 my_blink.d13C <- Blink(
   Y = GAPIT_Pheno_d13C,
@@ -204,9 +221,9 @@ import pandas as pd
 import numpy as np
 import xgboost xgb
 
-SNPs = pd.read_csv("/scratch/smc2266/Pipo_Exome_Capture/Plates_2_6_GWAS/Physiological_DATA/gen.imp.GWAS.MAF.005.df.proper.orient.RDA.Style.Imput.csv")
+SNPs = pd.read_csv("gen.imp.GWAS.MAF.005.df.proper.orient.RDA.Style.Imput.csv")
 
-Phenotypes = pd.read_csv("/scratch/smc2266/Pipo_Exome_Capture/Plates_2_6_GWAS/Physiological_DATA/Pipo_P2_6_eigen_vectors_ww_traits_vcf_order_updated_all_traits_measured_as_of_11_13_24_Osmo_needles_per_bundle_isotopes_seed_sources_Updated.csv")
+Phenotypes = pd.read_csv("Pipo_P2_6_eigen_vectors_ww_traits_vcf_order_updated_all_traits_measured_as_of_11_13_24_Osmo_needles_per_bundle_isotopes_seed_sources_Updated.csv")
 
  
 Height = Phenotypes.iloc[:,20] ## whereever the trait of interest is
@@ -312,6 +329,7 @@ np.mean(scores2) ## shows mean
 
 
 ### Setting up leaveone group out cross validation
+from sklearn.model_selection import LeaveOneGroupOut
 
 region = Phenotypes.iloc[:,30]
 
