@@ -145,7 +145,7 @@ srun kallisto quant \
 
 
 ########################################################################################################
-### Snp imputation R obtained from https://popgen.nescent.org/2018-03-27_RDA_GEA.html
+### Snp imputation R 
 library(vcfR)
 read.vcfR("Pipo.bcftools.Qual.20.MAF.0.05.Cll.Rate..75.Filt.P2_6.vcf.gz.recode.vcf") -> P.2.6.bcftools
 vcfR2genlight(P.2.6.bcftools) -> P.2.6.bcftools.gl
