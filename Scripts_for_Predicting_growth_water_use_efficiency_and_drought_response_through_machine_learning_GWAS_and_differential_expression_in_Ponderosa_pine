@@ -71,7 +71,6 @@ srun kraken2-build --download-library bacteria --threads 32 --db RNA_Contaminati
 srun kraken2-build --download-library protozoa --threads 32 --db RNA_Contamination
 srun kraken2-build --download-library human --threads 32 --db RNA_Contamination
 srun kraken2-build --download-library fungi --threads 32 --db RNA_Contamination
-srun kraken2-build --download-library plant --threads 32 --db RNA_Contamination
 srun kraken2-build --build --threads 32 --db RNA_Contamination
 
 ##### Kraken Contaim run
